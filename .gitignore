@@ -1,0 +1,6 @@
+*.pyc
+*.build
+*.egg-info
+
+# Ignore setuptools_scm created version.py
+src/alpahcas/version.py
