@@ -15,6 +15,7 @@ dependencies = [
     "numpy ~= 2.3.3",
     "pandas ~= 2.3.3",
     "scipy ~= 1.16.2",
+    "sep ~= 1.4.1",
 ]
 
 [project.optional-dependencies]
