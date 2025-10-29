@@ -6,7 +6,7 @@ from pathlib import Path
 LOGLEVELS = {
     "warn": logging.WARNING,
     "warning": logging.WARNING,
-    "notice": (logging.WARNING + logging.INFO),
+    "notice": (logging.WARNING + logging.INFO) // 2,
     "info": logging.INFO,
     "debug": logging.DEBUG,
 }
@@ -29,6 +29,37 @@ def add_logging_level(level, name):
     logclass = logging.getLoggerClass()
     setattr(logclass, name, partialmethod(logclass.log, level))
     setattr(logger, name, partial(logger.log, level))
+
+
+add_logging_level(LOGLEVELS["notice"], "NOTICE")
+
+
+def set_logging(level: str = "NOTICE", logfile: str = "", file_level: str = ""):
+    """Set up some default logging configuration.
+
+    Note: this doesn't use a dict- or file-config; it is felt that the
+    logging setup should still be relatively simple, with only options
+    for the logging level and whether or not to (also) log to file.
+
+    """
+
+    if level is None:
+        level = cfg.log.loglevel
+
+    level = LOGLEVELS[level.lower()]
+    fmt = "%(asctime)s  [%(levelname)-5s] - %(module)s.%(funcName)s():%(lineno)d: %(message)s"
+    formatter = logging.Formatter(fmt, datefmt="%y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    handler.setLevel(level)
+    logger.addHandler(handler)
+    if logfile:
+        file_level = LOGLEVELS[file_level.lower()]
+        handler = logging.FileHandler(logfile)
+        handler.setFormatter(formatter)
+        handler.setLevel(file_level)
+        logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
 
 
 class NonePath(Path):
