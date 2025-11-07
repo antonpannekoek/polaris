@@ -12,7 +12,7 @@ import sys
 import astropy.io.fits as pyfits
 import numpy as np
 
-from .config import config as cfg
+from .config import config as cfg, read_config
 from .constants import ANGLES, MATRIX
 from .utils import NonePath
 from .version import __version__
@@ -147,6 +147,11 @@ class Frame:
     def __str__(self):
         return self.path
 
+    def write(self, name: str | Path, overwrite=False):
+        hdu0 = pyfits.PrimaryHDU(header=self.header)
+        hdu = pyfits.ImageHDU(data=self.data, header=header)
+        pyfits.HDUList([hdu0, hdu]).writeto(name, overwrite=overwrite)
+
 
 @dataclass  # (frozen=True)
 class PolFrame(Frame):
@@ -222,6 +227,12 @@ class StokesFrame(Frame):
         else:
             logger.error("unable to demodulate frames")
 
+    def write(self, name: str | Path, overwrite=False):
+        hdu0 = pyfits.PrimaryHDU(header=self.header)
+        hdu = pyfits.ImageHDU(data=self.image, header=self.header)
+        hdu.header["stokes"] = str(self.parameter)
+        pyfits.HDUList([hdu0, hdu]).writeto(name, overwrite=overwrite)
+
 
 @dataclass
 class RelStokesFrame(StokesFrame):
@@ -234,6 +245,15 @@ class RelStokesFrame(StokesFrame):
         }
         if self.parameter not in valid:
             raise ValueError(f"incorrect Stokes Parameter {frame.parameter}")
+
+
+@dataclass
+class GradientStokesFrame(StokesFrame):
+    @classmethod
+    def from_stokesframe(cls, frame: StokesFrame, axis="x"):
+        axis = 0 if "x" else 1
+        image = np.gradient(frame.image, axis=axis, edge_order=1)
+        return cls(frame.header, image, frame.path, frame.parameter)
 
 
 @dataclass
@@ -499,6 +519,65 @@ class IQUMosaic:
                 hdulists[key].writeto(path, overwrite=overwrite)
 
 
+def fitcorr(
+    frameset: IQUFrameSet, photpars: dict | None = None, corrpars: dict | None = None
+):
+    from .photometry import find_sources
+
+    photpars = photpars or {}
+    corrpars = corrpars or {}
+
+    sqrt3 = np.sqrt(3)
+
+    sources, subimage, bkg = find_sources(frameset, aper=photpars.get("aperture", 2.5))
+    print(type(sources[StokesParameter.I]))
+    i_sources = sources[StokesParameter.I]
+    print(i_sources.columns)
+    # Filter out elongated sources
+    elong = i_sources["a"] / i_sources["b"]
+    print(elong.max(), elong.min())
+    sel = elong <= corrpars.get("max_elongation", 2)
+
+    i_image = frameset.frames[StokesParameter.I].image
+    q_image = frameset.frames[StokesParameter.Q].image
+    u_image = frameset.frames[StokesParameter.U].image
+
+    halfside = corrpars.get("boundingbox", 10) / 2
+    if halfside > 0:
+        # Select only the (unique) pixels in a square around detected sources
+        height, width = i_image.shape
+        yy, xx = np.ogrid[:height, :width]
+        mask = np.zeros(i_image.shape, dtype=bool)
+        for _, row in i_sources[sel].iterrows():
+            mask |= (np.abs(xx - row["x"]) <= halfside) & (
+                np.abs(yy - row["y"]) <= halfside
+            )
+    else:  # use full images
+        mask = np.ones(i_image.shape, dtype=bool)
+
+    q_data = q_image[mask]
+    u_data = u_image[mask]
+
+    image = np.gradient(i_image, axis=0)
+    data = image[mask]
+    print(data.shape, i_image.shape, i_image.size)
+    matrix = data.reshape(-1, 1)
+    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, q_data)
+    print("Qx:", coeffs)
+    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, u_data)
+    print("Ux:", coeffs)
+
+    image = np.gradient(i_image, axis=1)
+    data = image[mask]
+    matrix = data.reshape(-1, 1)
+    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, q_data)
+    print("Qy:", coeffs)
+    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, u_data)
+    print("Uy:", coeffs)
+
+    exit()
+
+
 def write_fits(
     framesets: list[IQUFrameSet],
     prefix="polaris-stokes",
@@ -525,7 +604,16 @@ def write_fits(
         hdulists[key].writeto(path, overwrite=overwrite)
 
 
-def main():
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument("files", nargs="+", help="Input FITS files")
+    # parser.add_argument('--hdu'
+    parser.add_argument("--config", help="configuration file")
+    args = parser.parse_args()
+    return args
+
+
+def test():
     print(1)
 
     frame = Frame.from_file("polaris-deg60_0.fits", hdu=2)
@@ -569,35 +657,39 @@ def main():
     framesetIQU = IQUFrameSet.from_polframeset(pol3frameset)
     print(9)
 
-    indices = verify_hdus_equal(files)
+
+def main():
+    args = parse_args()
+    config = read_config(args.config)
+    params = config
+
+    indices = verify_hdus_equal(args.files)
     iquframesets = []
 
     import time
 
     start = time.time()
     for index in indices:
-        iquframesets.append(IQUFrameSet.from_files(files, hdu=index))
+        iquframesets.append(IQUFrameSet.from_files(args.files, hdu=index))
     delta = time.time() - start
-    print(10, delta)
-    # Multiprocessing is slow as long as no shared memory is used.
-    # In this particular case, it is the copying from the reduced frame
-    # back to the main thread, into the `uqyframesets`.
-    if len(sys.argv) > 1:
-        nproc = int(sys.argv[1])
-        func = partial(IQUFrameSet.from_files, files)
-        iquframesets = []
-        start = time.time()
-        with Pool(nproc) as pool:
-            iquframesets = pool.map(func, indices)
-        delta = time.time() - start
-        print(11, delta)
+
     write_fits(iquframesets, overwrite=True)
 
-    reliquframesets = []
-    for index in indices:
-        reliquframesets.append(RelIQUFrameSet.from_files(files, hdu=index))
-    print(12)
-    write_fits(reliquframesets, overwrite=True)
+    # reliquframesets = []
+    # for index in indices:
+    #    reliquframesets.append(RelIQUFrameSet.from_files(args.files, hdu=index))
+    # print(12)
+    # write_fits(reliquframesets, overwrite=True)
+
+    photpars = params["photometry"]
+    corrpars = params["correction"]
+    for i, frameset in enumerate(iquframesets):
+        frame = frameset.frames[StokesParameter.I]
+        gradframe = GradientStokesFrame.from_stokesframe(frame)
+        gradframe.write(f"gradient-{i}.fits", overwrite=True)
+
+        fitcorr(frameset, photpars=photpars, corrpars=corrpars)
+        exit()
 
 
 if __name__ == "__main__":

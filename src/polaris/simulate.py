@@ -54,11 +54,14 @@ class CCDImage:
         self.pixelsize = pixelsize * units.arcsec
         self.ron = ron
 
-    def run(self, table: Table, wcs: WCS, beta: float = 3.5):
+    def run(self, table: Table, wcs: WCS, beta: float = 3.5, shift=None):
         """Simulate a single CCD with a given WCS for stars given in `table`"""
 
         coords = SkyCoord(table["ra"], table["dec"], unit="degree")
         xcoords, ycoords = coords.to_pixel(wcs)
+        if shift:
+            xcoords += shift["x"]
+            ycoords += shift["y"]
 
         table["x_0"] = xcoords
         table["y_0"] = ycoords
@@ -208,6 +211,7 @@ class Mosaic:
         angle: float = None,
         polstars=None,
         poisson_noise: bool = True,
+        shift: dict[int, float] | None = None,
         rng=None,
     ):
         if isinstance(stars, int):
@@ -232,7 +236,7 @@ class Mosaic:
         for key, center in centers.items():
             logger.notice("Creating single CCD image")
             wcs = create_wcs(center, self.ccd)
-            image = self.ccd.run(table, wcs, starsim.beta)
+            image = self.ccd.run(table, wcs, starsim.beta, shift=shift)
             if polstars:
                 # Add polarised stars
                 image = image + self.ccd.run(polstars, wcs, starsim.beta)
@@ -326,7 +330,13 @@ def run(params):
             file.write("fk5\n")
             for x, y, q, u in zip(I["ra"], I["dec"], qfractions, ufractions):
                 file.write(f'circle({x},{y},3.0") # text={{{q:.3f}, {u:.3f}}}\n')
+        shifts = params["shifts"]
         for angle in polpars["angles"]:
+            shift = {}
+            if f"x_{angle}" in shifts:
+                shift["x"] = shifts[f"x_{angle}"]
+            if f"y_{angle}" in shifts:
+                shift["y"] = shifts[f"y_{angle}"]
             polstars = I.copy()
             modvec = mod_vector(angle)
             polstars["flux"] = (
@@ -344,6 +354,7 @@ def run(params):
                 angle=angle,
                 polstars=polstars,
                 poisson_noise=params["poisson_noise"],
+                shift=shift,
                 rng=rng,
             )
 

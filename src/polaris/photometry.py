@@ -78,7 +78,8 @@ def find_sources(frameset: PolFrameSet | IQUFrameSet, aper=2.5):
     subimage = {}
     for key, frame in frameset.frames.items():
         image = frame.image
-        image = image.view(image.dtype.newbyteorder("=")).byteswap()
+        if not image.dtype.isnative:
+            image = image.view(image.dtype.newbyteorder("=")).byteswap()
         bkg = sep.Background(image)
         background[key] = bkg.globalrms
         image = image - bkg
@@ -99,7 +100,9 @@ def find_sources(frameset: PolFrameSet | IQUFrameSet, aper=2.5):
         sources = sources[(sources["fluxflag"] == 0) & (sources["flag"] == 0)]
         sources_[key] = sources
         subimage[key] = image
-
+        pyfits.PrimaryHDU(data=image, header=frame.header).writeto(
+            f"frame{key}.fits", overwrite=True
+        )
     return sources_, subimage, background
 
 
