@@ -14,7 +14,7 @@ import numpy as np
 
 from .config import config as cfg, read_config
 from .constants import ANGLES, MATRIX
-from .utils import NonePath
+from .utils import set_logging, NonePath
 from .version import __version__
 
 
@@ -26,8 +26,8 @@ logger = logging.getLogger(__package__)
 
 class StokesParameter(enum.Enum):
     I = enum.auto()
-    U = enum.auto()
     Q = enum.auto()
+    U = enum.auto()
     V = enum.auto()
     # relative parameters
     relU = enum.auto()
@@ -530,12 +530,9 @@ def fitcorr(
     sqrt3 = np.sqrt(3)
 
     sources, subimage, bkg = find_sources(frameset, aper=photpars.get("aperture", 2.5))
-    print(type(sources[StokesParameter.I]))
     i_sources = sources[StokesParameter.I]
-    print(i_sources.columns)
     # Filter out elongated sources
     elong = i_sources["a"] / i_sources["b"]
-    print(elong.max(), elong.min())
     sel = elong <= corrpars.get("max_elongation", 2)
 
     i_image = frameset.frames[StokesParameter.I].image
@@ -558,24 +555,23 @@ def fitcorr(
     q_data = q_image[mask]
     u_data = u_image[mask]
 
-    image = np.gradient(i_image, axis=0)
-    data = image[mask]
-    print(data.shape, i_image.shape, i_image.size)
-    matrix = data.reshape(-1, 1)
-    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, q_data)
-    print("Qx:", coeffs)
-    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, u_data)
-    print("Ux:", coeffs)
-
+    coeffs = {}
     image = np.gradient(i_image, axis=1)
     data = image[mask]
     matrix = data.reshape(-1, 1)
-    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, q_data)
-    print("Qy:", coeffs)
-    coeffs, res, rank, singvals = np.linalg.lstsq(matrix, u_data)
-    print("Uy:", coeffs)
+    coeffs[(StokesParameter.Q, "x")], *_ = np.linalg.lstsq(matrix, q_data)
+    coeffs[(StokesParameter.U, "x")], *_ = np.linalg.lstsq(matrix, u_data)
 
-    exit()
+    image = np.gradient(i_image, axis=0)
+    data = image[mask]
+    matrix = data.reshape(-1, 1)
+    coeffs[(StokesParameter.Q, "y")], *_ = np.linalg.lstsq(matrix, q_data)
+    coeffs[(StokesParameter.U, "y")], *_ = np.linalg.lstsq(matrix, u_data)
+    # Change 1-element arrays to single value
+    for key in coeffs:
+        coeffs[key] = float(coeffs[key][0])
+
+    return coeffs
 
 
 def write_fits(
@@ -600,7 +596,6 @@ def write_fits(
             hdulists[key].append(pyfits.ImageHDU(frame.image, frame.header))
     for key in keys:
         path = Path(f"{prefix}{key}{postfix}.fits")
-        print(f"{key = }; {key}, {path = }")
         hdulists[key].writeto(path, overwrite=overwrite)
 
 
@@ -614,82 +609,68 @@ def parse_args():
 
 
 def test():
-    print(1)
-
     frame = Frame.from_file("polaris-deg60_0.fits", hdu=2)
-    print(2)
     frames = [
         Frame.from_file("polaris-deg0_0.fits", hdu=2),
         Frame.from_file("polaris-deg60_0.fits", hdu=2),
         Frame.from_file("polaris-deg120_0.fits", hdu=2),
     ]
-    print(3)
     frameset = FrameSet(frames)
-    print(4)
     try:
         polframeset = PolFrameSet.from_frames(frames)
         print("ERROR")
     except ValueError as exc:
         assert str(exc) == "incorrect frame type"
-        print(5)
     frames = [
         PolFrame.from_file("polaris-deg0_0.fits", hdu=2),
         PolFrame.from_file("polaris-deg60_0.fits", hdu=2),
     ]
     polframeset = PolFrameSet.from_frames(frames)
-    print(6)
     try:
         polframeset = Pol3FrameSet.from_frames(frames)
         print("ERROR")
     except ValueError as exc:
         assert str(exc) == "incorrect angles"
-        print(7)
     frames = [
         PolFrame.from_file("polaris-deg0_0.fits", hdu=2),
         PolFrame.from_file("polaris-deg60_0.fits", hdu=2),
         PolFrame.from_file("polaris-deg120_0.fits", hdu=2),
     ]
     pol3frameset = Pol3FrameSet.from_frames(frames)
-    print(8)
     stokesI = StokesFrame.from_file("polaris-stokesI.fits", parameter="i", hdu=2)
 
     files = ["polaris-deg0_0.fits", "polaris-deg60_0.fits", "polaris-deg120_0.fits"]
     framesetIQU = IQUFrameSet.from_polframeset(pol3frameset)
-    print(9)
 
 
 def main():
     args = parse_args()
+    set_logging()
     config = read_config(args.config)
     params = config
 
     indices = verify_hdus_equal(args.files)
+    logger.notice("Detected %d valid images per file / chips per mosiac", len(indices))
     iquframesets = []
 
-    import time
-
-    start = time.time()
+    logger.notice("Reducing frames to I-Q-U frames")
     for index in indices:
         iquframesets.append(IQUFrameSet.from_files(args.files, hdu=index))
-    delta = time.time() - start
-
     write_fits(iquframesets, overwrite=True)
 
-    # reliquframesets = []
-    # for index in indices:
-    #    reliquframesets.append(RelIQUFrameSet.from_files(args.files, hdu=index))
-    # print(12)
-    # write_fits(reliquframesets, overwrite=True)
-
+    logger.notice("Estimating misalignment effect")
     photpars = params["photometry"]
     corrpars = params["correction"]
+    coeffs = {}
+
     for i, frameset in enumerate(iquframesets):
+        logger.notice("Reducing frameset %d", indices[i])
         frame = frameset.frames[StokesParameter.I]
         gradframe = GradientStokesFrame.from_stokesframe(frame)
         gradframe.write(f"gradient-{i}.fits", overwrite=True)
 
-        fitcorr(frameset, photpars=photpars, corrpars=corrpars)
-        exit()
+        coeffs[i] = fitcorr(frameset, photpars=photpars, corrpars=corrpars)
+        logger.notice("Shift corrections for frameset %d: %s", indices[i], coeffs[i])
 
 
 if __name__ == "__main__":
