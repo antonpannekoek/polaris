@@ -59,9 +59,11 @@ This will install some of the packages used for development (formatters, linters
 
 Use the configuration file `sim.cfg`, in TOML format, to set any parameters.
 
-The default will create a 4 by 2 mosaic of 2K by 4K pixel chips, with random stars 25,000 random stars, plus some stars added from a selected set of GAIA stars (the `gaia.duckdb` is added to this repository for convenience). A small shift of 0.2 pixels is given for the x-position of the 60-degree-polarizer frame (this applies to all chips in the mosaic simultaneously).
+The default will create a 4 by 2 mosaic of 2K by 4K pixel chips, with random stars 25,000 random stars, plus some stars added from a selected set of GAIA stars. A small shift of 0.2 pixels is given for the x-position of the 60-degree-polarizer frame (this applies to all chips in the mosaic simultaneously).
 
-Running
+You will need a database with a selection of GAIA stars; download this from https://surfdrive.surf.nl/s/iZcyekm25m2PeiX (560 MB) and store the file as `gaia.duckdb` in your working directory, together with the `sim.fg` file.
+
+Then, running
 
 ```
 python -m polaris.simulate sim.cfg
