@@ -131,7 +131,8 @@ class Frame:
 
     header: pyfits.Header
     image: np.ndarray
-    path: Path
+    name: str = ""
+    path: Path | NonePath = NonePath
 
     @classmethod
     def from_file(cls, path: Path, hdu: int = 0):
@@ -145,7 +146,7 @@ class Frame:
         return cls(hdu.header, hdu.data, path)
 
     def __str__(self):
-        return self.path
+        return self.name
 
     def write(self, name: str | Path, overwrite=False):
         hdu0 = pyfits.PrimaryHDU(header=self.header)
@@ -168,7 +169,7 @@ class PolFrame(Frame):
 
 @dataclass
 class StokesFrame(Frame):
-    parameter: StokesParameter
+    parameter: StokesParameter | None = None
 
     @classmethod
     def from_file(cls, path: Path, parameter: StokesParameter | str, hdu: int = 0):
@@ -314,7 +315,6 @@ class IQUFrameSet(FrameSet):
     def from_polframeset(cls, frameset: PolFrameSet, subsky: bool = False):
         iquframeset = cls({})
         iquframeset.reduce(frameset, subsky=subsky)
-
         return cls(iquframeset.frames)
 
     @classmethod
@@ -522,14 +522,14 @@ class IQUMosaic:
 def fitcorr(
     frameset: IQUFrameSet, photpars: dict | None = None, corrpars: dict | None = None
 ):
-    from .photometry import find_sources
+    from .photometry import run_phot
 
     photpars = photpars or {}
     corrpars = corrpars or {}
 
     sqrt3 = np.sqrt(3)
 
-    sources, subimage, bkg = find_sources(frameset, aper=photpars.get("aperture", 2.5))
+    sources, subimage, bkg = run_phot(frameset, aper=photpars.get("aperture", 2.5))
     i_sources = sources[StokesParameter.I]
     # Filter out elongated sources
     elong = i_sources["a"] / i_sources["b"]
@@ -618,7 +618,6 @@ def test():
     frameset = FrameSet(frames)
     try:
         polframeset = PolFrameSet.from_frames(frames)
-        print("ERROR")
     except ValueError as exc:
         assert str(exc) == "incorrect frame type"
     frames = [
@@ -628,7 +627,6 @@ def test():
     polframeset = PolFrameSet.from_frames(frames)
     try:
         polframeset = Pol3FrameSet.from_frames(frames)
-        print("ERROR")
     except ValueError as exc:
         assert str(exc) == "incorrect angles"
     frames = [

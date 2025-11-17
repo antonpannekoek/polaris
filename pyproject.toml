@@ -16,6 +16,8 @@ dependencies = [
     "pandas ~= 2.3.3",
     "scipy ~= 1.16.2",
     "sep ~= 1.4.1",
+    "reproject ~= 0.19.0",
+    "astroalign ~= 2.6.2",
 ]
 
 [project.optional-dependencies]

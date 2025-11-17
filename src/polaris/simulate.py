@@ -76,7 +76,6 @@ class CCDImage:
 
 def query_catalog(name, coord: SkyCoord, fov: dict[str, units.Quantity]):
     # radius = np.sqrt((fov['width'] / 2)**2 + (fov['height'] / 2)**2)
-    conn = duckdb.connect(name, read_only=True)
     ra = coord.ra.degree
     decl = coord.dec.degree
     width = fov["width"].to(units.degree).value
@@ -84,19 +83,35 @@ def query_catalog(name, coord: SkyCoord, fov: dict[str, units.Quantity]):
     ra_range = [ra - width / 2, ra + width / 2]
     dec_range = [decl - height / 2, decl + height / 2]
 
-    query = conn.execute(
-        """
-select ra, "dec", phot_g_mean_mag from gaia where
+    with duckdb.connect(name, read_only=True) as conn:
+        query = conn.execute(
+            """
+select ra, "dec", mag from catalog where
 ra between ? and ? and "dec" between ? and ?
     """,
-        (*ra_range, *dec_range),
-    )
-    df = query.df()
-    df.rename(columns={"phot_g_mean_mag": "mag"}, inplace=True)
+            (*ra_range, *dec_range),
+        )
+        df = query.df()
     catalog = Table.from_pandas(df)
-    conn.close()
 
     return catalog
+
+
+def create_catalog(name, stars: Table):
+    """Save a table of stars to a DuckDB database
+
+    The required columns are 'ra', 'dec' and 'mag'
+
+    """
+
+    df = stars.to_pandas()
+    if len({"ra", "dec", "mag"} & set(df.columns)) != 3:
+        raise ValueError("missing column(s) in table")
+
+    with duckdb.connect(name, read_only=False) as conn:
+        conn.execute("drop table if exists catalog")
+        conn.execute("create table catalog as select * from df")
+    logger.info("Stored selected stars in catalog %s", name)
 
 
 def create_wcs(center: SkyCoord, ccd: CCDImage):
@@ -120,6 +135,7 @@ class StarSimulation:
         magrange: tuple[float],
         psfparams: dict[str, float],
         catalog: str | None = None,
+        catalog_fraction: float = -1,
     ):
         """
 
@@ -135,6 +151,9 @@ class StarSimulation:
 
         - catalog: catalog name of the DuckDB database file
 
+        - catalog_fraction: if a positive fraction, don't use the catalog as input,
+            but save a fraction of the simulated stars to the catalog as output
+
         """
 
         self.magrange = magrange
@@ -142,12 +161,14 @@ class StarSimulation:
         self.fwhm_std = psfparams.get("fwhm_std", 0.0)
         self.beta = psfparams.get("beta", 3.5)
         self.catalog = catalog
+        self.catalog_fraction = catalog_fraction
 
     def copy(self):
         return StarSimulation(
             magrange=self.magrange[:],
             psfparams={"fwhm": self.fwhm, "fwhm": self.fwhm_std, "beta": self.beta},
             catalog=self.catalog,
+            catalog_fraction=self.catalog_fraction,
         )
 
     def run(
@@ -164,6 +185,7 @@ class StarSimulation:
         rng = np.random.default_rng(rng)
 
         stars = Table()
+        logger.info("Simulating %d random stars", nstars)
         low = (center.ra - fov["width"] / 2).value
         high = (center.ra + fov["width"] / 2).value
         stars["ra"] = rng.uniform(low, high, nstars) * units.degree
@@ -175,12 +197,22 @@ class StarSimulation:
         stars["mag"] = (1 / 0.6) * np.log10(
             unirand * (10 ** (0.6 * mmax) - 10 ** (0.6 * mmin)) + 10 ** (0.6 * mmin)
         )
-        if self.catalog:
+
+        # Use catalog stars or save a random fraction to a catalog
+        if self.catalog_fraction <= 0 and self.catalog:
             catalog = query_catalog(self.catalog, center, fov)
+            logger.info("Using %d stars from the database catalog", len(catalog))
             stars = vstack([stars, catalog])
+        elif self.catalog_fraction > 0 and self.catalog:
+            n = len(stars)
+            size = int(self.catalog_fraction * n)
+            logger.info("Selecting %d stars as catalog stars", size)
+            indices = rng.choice(len(stars), size=size, replace=False)
+            create_catalog(self.catalog, stars[indices])
 
         stars["flux"] = t_exp * 10.0 ** (-0.4 * (stars["mag"] - zeropoint))
         stars["fwhm"] = rng.normal(self.fwhm, self.fwhm_std, len(stars))
+
         return stars
 
 
@@ -273,19 +305,79 @@ class Mosaic:
         return centers
 
 
-def parse_args():
-    parser = ArgumentParser()
-    parser.add_argument("config", help="configuration file")
-    args = parser.parse_args()
-    return args
+def save_to_region(I, qfractions, ufractions, regfile):
+    """Save the polarized stars to a region file, with annotation"""
+
+    with open(regfile, "w") as file:
+        file.write("# Region file format: DS9 version 4.1\n")
+        file.write(
+            'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" '
+            "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 "
+            "source=1\nfk5\n"
+        )
+        for x, y, q, u in zip(I["ra"], I["dec"], qfractions, ufractions):
+            file.write(f'circle({x},{y},3.0") # text={{{q:.3f}, {u:.3f}}}\n')
+
+
+def add_polarization(mosaic, center, stars, params, starsim, rng=None):
+    """Add polarized stars to the existing simulation"""
+
+    rng = np.random.default_rng(rng)
+
+    # Create 'polarized' Q and U images
+    # for selected stars
+    polpars = params["polarisation"]
+    starsim.magrange = polpars["magrange"]
+    # Don't use stars from the catalog as polarized stars
+    starsim.catalog = None
+    nstars = polpars["nstars"]
+    qrange = polpars["qrange"]
+    urange = polpars["urange"]
+    # Add `nstars` stars to the I images
+    stokes_i = starsim.run(
+        center,
+        mosaic.fov,
+        params["t_exp"],
+        nstars,
+        zeropoint=params["zeropoint"],
+        rng=rng,
+    )
+
+    # The Q & U frames are copies of I
+    stokes_q = stokes_i.copy()
+    stokes_u = stokes_i.copy()
+    # with their fluxes changed by random amount
+    qfractions = rng.uniform(*qrange, size=nstars)
+    stokes_q["flux"] *= qfractions
+    ufractions = rng.uniform(*urange, size=nstars)
+    stokes_u["flux"] *= ufractions
+
+    # Save the 'polarized' stars to a DS9 region file
+    if regfile := params["region"]["regfile"]:
+        save_to_region(stokes_i, qfractions, ufractions, regfile)
+
+    return {"I": stokes_i, "Q": stokes_q, "U": stokes_u}
 
 
 def run(params):
     rng = np.random.default_rng(params["seed"])
     center = SkyCoord(params["sky"]["ra"], params["sky"]["dec"], unit="degree")
     psfparams = params["psf"]
+    action = params["catalog"]["action"]
+    catfraction = -1
+    if action == "create":
+        catfraction = params["catalog"]["fraction"]
+        print(catfraction, type(catfraction))
+    elif action != "use":
+        raise ValueError(
+            '[simulation.catalog]: action should be one of "create" or "use"'
+        )
+
     starsim = StarSimulation(
-        magrange=params["magrange"], psfparams=psfparams, catalog=params["catalog"]
+        magrange=params["magrange"],
+        psfparams=psfparams,
+        catalog=params["catalog"]["dbname"],
+        catalog_fraction=catfraction,
     )
     ccdparams = params["ccd"]
     ccd = CCDImage(
@@ -302,48 +394,31 @@ def run(params):
     )
 
     if "polarisation" in params:
+        stokes = add_polarization(mosaic, center, stars, params, starsim, rng=rng)
+
+        # Convert the I, Q and U frames to frames at polarizer angles
         polpars = params["polarisation"]
-        starsim.magrange = polpars["magrange"]
-        starsim.catalog = None
-        nstars = polpars["nstars"]
-        qrange = polpars["qrange"]
-        urange = polpars["urange"]
-        I = starsim.run(
-            center,
-            mosaic.fov,
-            params["t_exp"],
-            polpars["nstars"],
-            zeropoint=params["zeropoint"],
-            rng=rng,
-        )
-        Q = I.copy()
-        U = I.copy()
-        qfractions = rng.uniform(*qrange, size=nstars)
-        Q["flux"] *= qfractions
-        ufractions = rng.uniform(*urange, size=nstars)
-        U["flux"] *= ufractions
-        with open("ds9.reg", "w") as file:
-            file.write("# Region file format: DS9 version 4.1\n")
-            file.write(
-                'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
-            )
-            file.write("fk5\n")
-            for x, y, q, u in zip(I["ra"], I["dec"], qfractions, ufractions):
-                file.write(f'circle({x},{y},3.0") # text={{{q:.3f}, {u:.3f}}}\n')
         shifts = params["shifts"]
         for angle in polpars["angles"]:
+            # Allow for shifts in the polarizer frames
             shift = {}
             if f"x_{angle}" in shifts:
                 shift["x"] = shifts[f"x_{angle}"]
             if f"y_{angle}" in shifts:
                 shift["y"] = shifts[f"y_{angle}"]
-            polstars = I.copy()
+            polstars = stokes["I"].copy()
             modvec = mod_vector(angle)
+            # modulate the flux for the current angle
             polstars["flux"] = (
-                I["flux"] * modvec[0] + Q["flux"] * modvec[1] + U["flux"] * modvec[2]
+                stokes["I"]["flux"] * modvec[0]
+                + stokes["Q"]["flux"] * modvec[1]
+                + stokes["U"]["flux"] * modvec[2]
             ) / 2
-            logger.notice("Creating mosaic for polarization angle %.1f", angle)
+
+            logger.info("Creating mosaic for polarization angle %.1f", angle)
             outfile = f"polaris-deg{angle:.1f}".replace(".", "_") + ".fits"
+
+            # Save the output file, with normal stars and polarized stars
             mosaic.simulate(
                 center,
                 starsim,
@@ -359,7 +434,7 @@ def run(params):
             )
 
     else:
-        logger.notice("Creating mosaic")
+        logger.info("Creating mosaic")
         mosaic.simulate(
             center,
             starsim,
@@ -370,8 +445,41 @@ def run(params):
         )
 
 
+def setup_logging(level: str = "warning"):
+    """Set up some default logging configuration.
+
+    Note: this doesn't use a dict- or file-config; it is felt that the
+    logging setup should still be relatively simple, with only options
+    for the logging level and whether or not to (also) log to file.
+
+    """
+
+    level = LOGLEVELS[level.lower()]
+    fmt = "%(asctime)s  [%(levelname)-5s] - %(module)s.%(funcName)s():%(lineno)d: %(message)s"
+    formatter = logging.Formatter(fmt, datefmt="%y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    handler.setLevel(level)
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument("config", help="configuration file")
+    parser.add_argument(
+        "--loglevel",
+        choices=["warning", "info", "debug"],
+        default="warning",
+        help="logging level",
+    )
+    args = parser.parse_args()
+    return args
+
+
 def main():
     args = parse_args()
+    setup_logging(level=args.loglevel)
     config = read_config(args.config)
     params = config["simulation"]
     params["seed"] = None if params["random_seed"] < 0 else params["random_seed"]
