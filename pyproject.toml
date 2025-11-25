@@ -10,13 +10,14 @@ dynamic = ["version"]  # Derived from Git, with a fallback version
 requires-python = ">=3.13,<3.15"
 license = {text = "MIT"}
 dependencies = [
+    "astroalign ~= 2.6.2",
     "astropy ~= 7.1.0",
     "duckdb ~= 1.4.0",
     "numpy ~= 2.3.3",
     "pandas ~= 2.3.3",
+    "photutils ~= 2.3.0",
     "scipy ~= 1.16.2",
     "sep ~= 1.4.1",
-    "astroalign ~= 2.6.2",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +29,6 @@ dev = [
 ]
 extra = [
       "matplotlib ~= 3.10.6",
-      "photutils ~= 2.3.0",
       "jupyter ~= 1.1.1",
 ]
 
