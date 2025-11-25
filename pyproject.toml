@@ -32,6 +32,13 @@ extra = [
       "jupyter ~= 1.1.1",
 ]
 
+# Standalone scripts; uncomment and reinstall if this functionality is
+# wanted. Otherwise, use `python -m polaris.pipeline` or
+# `python -m polaris.simulation` for the same functionality.
+[project.scripts]
+#polaris = "polaris.pipeline:main"
+#polaris-sim = "polaris.simulation:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
