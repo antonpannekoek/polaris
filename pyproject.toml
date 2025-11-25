@@ -42,6 +42,10 @@ extra = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.ruff]
+# Ignore the auto-generated file
+exclude = ["src/polaris/version.py"]
+
 [tool.flake8]
 # Match Black's line length
 max-line-length = 88
