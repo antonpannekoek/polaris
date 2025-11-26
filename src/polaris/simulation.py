@@ -26,15 +26,21 @@ from photutils.psf import MoffatPSF
 from .config import read_config
 
 
-logger = logging.getLogger(__package__)
-
-
+LOGLEVELS = {
+    "warn": logging.WARNING,
+    "warning": logging.WARNING,
+    "info": logging.INFO,
+    "debug": logging.DEBUG,
+}
 MATRIX = {
     # Unnormalized modulation matrix
     # inner lists are the rows
     3: [[1, 1, 0], [1, -0.5, -np.sqrt(3) / 2], [1, -0.5, np.sqrt(3) / 2]],
     # 4: [[1, 1, 1, 1], [2, 0, -2, 0], [0, -2, 0, -2]],
 }
+
+
+logger = logging.getLogger(__package__)
 
 
 def mod_vector(angle: float):
@@ -162,7 +168,7 @@ class StarSimulation:
     def copy(self):
         return StarSimulation(
             magrange=self.magrange[:],
-            psfparams={"fwhm": self.fwhm, "fwhm": self.fwhm_std, "beta": self.beta},
+            psfparams={"fwhm": self.fwhm, "fwhm_std": self.fwhm_std, "beta": self.beta},
             catalog=self.catalog,
             catalog_fraction=self.catalog_fraction,
         )
@@ -244,7 +250,7 @@ class Mosaic:
     ):
         if isinstance(stars, int):
             table = starsim.run(
-                center, self.fov, t_exp, nstars, zeropoint=zeropoint, rng=rng
+                center, self.fov, t_exp, stars, zeropoint=zeropoint, rng=rng
             )
         else:
             table = stars
@@ -301,7 +307,7 @@ class Mosaic:
         return centers
 
 
-def save_to_region(I, qfractions, ufractions, regfile):
+def save_to_region(sources, qfractions, ufractions, regfile):
     """Save the polarized stars to a region file, with annotation"""
 
     with open(regfile, "w") as file:
@@ -311,7 +317,7 @@ def save_to_region(I, qfractions, ufractions, regfile):
             "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 "
             "source=1\nfk5\n"
         )
-        for x, y, q, u in zip(I["ra"], I["dec"], qfractions, ufractions):
+        for x, y, q, u in zip(sources["ra"], sources["dec"], qfractions, ufractions):
             file.write(f'circle({x},{y},3.0") # text={{{q:.3f}, {u:.3f}}}\n')
 
 

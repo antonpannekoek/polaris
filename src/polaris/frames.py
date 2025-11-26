@@ -1,18 +1,15 @@
-from argparse import ArgumentParser
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 import enum
-from functools import partial
 import logging
 from multiprocessing import Pool
 from pathlib import Path
-import sys
 
 import astropy.io.fits as pyfits
 import numpy as np
 
-from .config import config as cfg, read_config
+from .config import config as cfg
 from .constants import ANGLES, MATRIX
 from .version import __version__
 
@@ -44,7 +41,7 @@ logger = logging.getLogger(__package__)
 
 
 class StokesParameter(enum.Enum):
-    I = enum.auto()
+    I = enum.auto()  # noqa: E741
     Q = enum.auto()
     U = enum.auto()
     V = enum.auto()
@@ -109,7 +106,6 @@ def verify_hdus_equal(files, keys=None) -> list[int]:
 
     shapes = {}
     valid_hdus = []  # ensure the number (and type) of HDUs match
-    valid_keys = []
     for file in files:
         with pyfits.open(file) as hdulist:
             test_hdus = []
@@ -169,7 +165,7 @@ class Frame:
 
     def write(self, name: str | Path, overwrite=False):
         hdu0 = pyfits.PrimaryHDU(header=self.header)
-        hdu = pyfits.ImageHDU(data=self.data, header=header)
+        hdu = pyfits.ImageHDU(data=self.data, header=self.header)
         pyfits.HDUList([hdu0, hdu]).writeto(name, overwrite=overwrite)
 
 
@@ -264,7 +260,7 @@ class RelStokesFrame(StokesFrame):
             StokesParameter.relV,
         }
         if self.parameter not in valid:
-            raise ValueError(f"incorrect Stokes Parameter {frame.parameter}")
+            raise ValueError(f"incorrect Stokes Parameter {self.parameter}")
 
 
 @dataclass
@@ -319,11 +315,6 @@ class Pol3FrameSet(PolFrameSet):
 @dataclass
 class Pol4FrameSet(PolFrameSet):
     req_angles: frozenset[int] = frozenset({0, 45, 90, 135})
-
-
-@dataclass
-class Pol3FrameSet(PolFrameSet):
-    req_angles: set[int] = frozenset({0, 60, 120})
 
 
 @dataclass
@@ -409,12 +400,6 @@ class IQUFrameSet(FrameSet):
             self.frames[parameter] = StokesFrame(
                 header=header, image=image, path=path, parameter=parameter
             )
-
-    def to_hdus(self) -> dict:
-        return {
-            hdus[key]: pyfits.ImageHDU(frame.image, frame.header)
-            for key, frame in self.frames.items()
-        }
 
 
 @dataclass
@@ -545,8 +530,6 @@ def fitcorr(
 
     photpars = photpars or {}
     corrpars = corrpars or {}
-
-    sqrt3 = np.sqrt(3)
 
     sources, subimage, bkg = run_phot(frameset, aper=photpars.get("aperture", 2.5))
     i_sources = sources[StokesParameter.I]
