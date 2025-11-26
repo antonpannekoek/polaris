@@ -409,7 +409,7 @@ def correct_induced_polarization(
         frame_q120, frame_u120 = calc_induced_polarization_from_shift(
             polframes[0], polframes[120], frames[StokesParameter.I]
         )
-        # To do: are these two equations correct?
+        # To do: verify that these two equations correct
         q_ind = frame_q60.image + frame_q120.image
         u_ind = frame_u60.image - frame_u120.image
 
@@ -466,7 +466,7 @@ def register_frames(frames: PolFrames, inplace=False) -> None | PolFrames:
         logger.info(
             "estimating transformation between %s and %s", frames[0].name, frame.name
         )
-        transform = estimate_transform("affine", source, target)
+        transform = estimate_transform("euclidian", source, target)
         logger.info("transforming %d angle frame to 0 angle frame")
         dest, _ = apply_transform(transform, frame.image, frames[0].image)
         header = frame.header
