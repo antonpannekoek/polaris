@@ -24,13 +24,9 @@ from photutils.datasets import make_model_image, apply_poisson_noise
 from photutils.psf import MoffatPSF
 
 from .config import read_config
-from .utils import add_logging_level, LOGLEVELS
 
 
 logger = logging.getLogger(__package__)
-
-
-add_logging_level(LOGLEVELS["notice"], "NOTICE")
 
 
 MATRIX = {
@@ -266,7 +262,7 @@ class Mosaic:
         hdus = [pyfits.PrimaryHDU()]
         hdus[0].header.extend(cards)
         for key, center in centers.items():
-            logger.notice("Creating single CCD image")
+            logger.info("Creating single CCD image")
             wcs = create_wcs(center, self.ccd)
             image = self.ccd.run(table, wcs, starsim.beta, shift=shift)
             if polstars:
@@ -281,7 +277,7 @@ class Mosaic:
             hdu = pyfits.ImageHDU(image.astype(np.float64), header=wcs.to_header())
             hdu.header.extend(cards)
             hdus.append(hdu)
-        logger.notice("Writing mosaic to file %s", outfile)
+        logger.info("Writing mosaic to file %s", outfile)
         pyfits.HDUList(hdus).writeto(outfile, overwrite=True)
 
     def _calc_centers(self, center: SkyCoord):

@@ -14,8 +14,27 @@ import numpy as np
 
 from .config import config as cfg, read_config
 from .constants import ANGLES, MATRIX
-from .utils import set_logging, NonePath
 from .version import __version__
+
+
+class NonePath(Path):
+    def exists(self, **_):
+        return False
+
+    def is_file(self, **_):
+        return False
+
+    def is_dir(self, **_):
+        return False
+
+    def joinpath(self, *pathsegments):
+        return self
+
+    def with_segments(self, *pathsegments):
+        return self
+
+    def absolute(self):
+        return self
 
 
 logger = logging.getLogger(__package__)
