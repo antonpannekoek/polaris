@@ -15,11 +15,14 @@ import pandas as pd
 import sep
 
 from .constants import ANGLES, MATRIX
-from .frames import Frame, PolFrame, StokesFrame, StokesParameter
-
-type PolFrames = dict[int, PolFrame]
-type StokesFrames = dict[StokesParameter, StokesFrame]
-
+from .frames import (
+    Frame,
+    PolFrame,
+    StokesFrame,
+    PolFrames,
+    StokesFrames,
+    StokesParameter,
+)
 
 LOGLEVELS = {
     "warn": logging.WARNING,
@@ -466,7 +469,7 @@ def register_frames(frames: PolFrames, inplace=False) -> None | PolFrames:
         logger.info(
             "estimating transformation between %s and %s", frames[0].name, frame.name
         )
-        transform = estimate_transform("euclidian", source, target)
+        transform = estimate_transform("euclidean", source, target)
         logger.info("transforming %d angle frame to 0 angle frame")
         dest, _ = apply_transform(transform, frame.image, frames[0].image)
         header = frame.header
@@ -554,7 +557,6 @@ def read_files(paths, headerkeys):
                         image=hdu.data,
                         header=hdu.header,
                         name=f"image-{angle}",
-                        path=path,
                         angle=angle,
                     )
                     mosaics[angle][i] = frame
