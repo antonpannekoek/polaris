@@ -12,6 +12,7 @@ ds9 -tile grid layout 3 4 'polaris.fits[3]' 'polaris.fits[2]' 'polaris.fits[1]' 
 from argparse import ArgumentParser
 import logging
 from pathlib import Path
+import tomllib
 
 from astropy.coordinates import SkyCoord
 import astropy.io.fits as pyfits
@@ -22,8 +23,6 @@ import duckdb
 import numpy as np
 from photutils.datasets import make_model_image, apply_poisson_noise
 from photutils.psf import MoffatPSF
-
-from .config import read_config
 
 
 LOGLEVELS = {
@@ -476,13 +475,15 @@ def parse_args():
         help="logging level",
     )
     args = parser.parse_args()
-    return args
+    with open(args.config, "rb") as fp:
+        config = tomllib.load(fp)
+    return config
 
 
 def main():
-    args = parse_args()
-    setup_logging(level=args.loglevel)
-    config = read_config(args.config)
+    config = parse_args()
+    setup_logging(level=config["logging"]["level"])
+
     params = config["simulation"]
     params["seed"] = None if params["random_seed"] < 0 else params["random_seed"]
 
