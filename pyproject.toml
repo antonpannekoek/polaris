@@ -54,6 +54,9 @@ max-line-length = 88
 # Iterator variables and a few special names
 good-names = "i, j, k, n, fp"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["setuptools>=80", "setuptools_scm>=9"]
 build-backend = "setuptools.build_meta"
