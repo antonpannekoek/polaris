@@ -1,10 +1,12 @@
 # VSTPOL pipeline
 
-Note: this software is currently very much pre-alpha software!
+Note: this software is currently very much alpha software!
+
+Polaris is a prototype for the polarization reduction step for VSTPol.
 
 ## VSTPOL
 
-VSTPOL is the polarization variant of the Very Large Telescope (VLT)
+VSTPOL is the polarization variant of the VLT (Very Large Telescope)
 Survey Telescope, a 2.6 meter survey telescope located at the Paranal
 VLT site in Chile. Attached to it is the 1-square degree OmegaCAM
 instrument, consistent of 32 CCDs with a total of 268 million (16K
@@ -30,7 +32,8 @@ un-polarized.
 
 ## Installation
 
-Installation is straightforward. Create a Python virtual environment and activate it. Then, from the downloaded or cloned project, run
+Installation is straightforward. Create a Python virtual environment
+and activate it. Then, from the downloaded or cloned project, run
 
 ```
 pip install .
@@ -50,33 +53,15 @@ To install a development environment, use
 pip install -e '.[dev]' .
 ```
 
-This will install some of the packages used for development (formatters, linters etc).
+This will install some of the packages used for development
+(formatters, linters etc).
 
 
-## Some example usage
+## Documentation
 
-### Simulate a set of observations
+Documentation can be find inside the [docs](docs/index.md) directory.
 
-Use the configuration file `sim.cfg`, in TOML format, to set any parameters.
+## License
 
-The default will create a 4 by 2 mosaic of 2K by 4K pixel chips, with random stars 25,000 random stars, plus some stars added from a selected set of GAIA stars. A small shift of 0.2 pixels is given for the x-position of the 60-degree-polarizer frame (this applies to all chips in the mosaic simultaneously).
-
-You will need a database with a selection of GAIA stars; download this from https://surfdrive.surf.nl/s/iZcyekm25m2PeiX (560 MB) and store the file as `gaia.duckdb` in your working directory, together with the `sim.fg` file.
-
-Then, running
-
-```
-python -m polaris.simulate sim.cfg
-```
-
-will create three FITS files, one for each measurement angle. The FITS files will contain several extensions, each extension matching 1 chip; the primary extension is empty.
-
-### Reduce a set of frames
-
-If the default settings are used, the simulation will create a set of `polaris-deg*_0.fits` files. These can then be reduced to their I, Q and U (mosaic) frames, as well as the relative frames, and the corrections for shifts are estimated, by using
-
-```
-python -m polaris.frames polaris-deg0_0.fits polaris-deg60_0.fits polaris-deg120_0.fits --config polaris.cfg
-```
-
-Note that both the simulation and reduction will print various simple debugging output; this can be ignored. The last print outputs from the reduction will show the estimated scale factors of the Q & U polarization with respect to the I gradient, alpha.
+Polaris is copyright 2025 University of Amsterdam, and licensed under
+the MIT license. See LICENSE for the details.
