@@ -44,3 +44,6 @@ jobs:
         run: |
           python -m polaris.pipeline --help
           python -m polaris.simulation --help
+      - name: Run unit tests
+        run: |
+          pytest
